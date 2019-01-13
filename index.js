@@ -2,6 +2,17 @@
 const videoWidth = 600;
 const videoHeight = 500;
 
+///const calibratedWeightMeaning = ['rfa', 'rbi', 'lfa', 'lbi', 'rca', 'rth', 'lca', 'lth']
+const calibratedWeightMeaning = ['lfa', 'lbi', 'rfa', 'rbi', 'lca', 'lth', 'rca', 'rth']
+
+const calibratedWeightPairs = [[10, 8], [8, 6], [9, 7], [7, 5], [16, 14], [14, 12], [15, 13], [13, 11]]
+
+var modelCalibrateLoc = "models/calibrate.png"
+var modelCalibratedWeights = [];
+var userCalibratedWeights = [];
+var modelVectors = [];
+var calib = false;
+var save = false;
 
 function isAndroid() {
   return /Android/i.test(navigator.userAgent);
@@ -14,6 +25,91 @@ function isiOS() {
 function isMobile() {
   return isAndroid() || isiOS();
 }
+
+function calibrate()
+{
+  setTimeout(function(){calib = true} ,3000)
+}
+
+function saver()
+{
+  setTimeout(function(){save = true}, 3000)
+}
+
+/**
+async function calibrate(net) {
+  var canvas = document.getElementById('images');
+  canvas.width = 300
+  canvas.height = 300
+  var ctx = canvas.getContext('2d');
+  var imgEle = document.getElementById('filler')
+  imgEle.src = modelCalibrateLoc
+  var imageScaleFactor = 0.5;
+  var outputStride = 16;
+  var flipHorizontal = false;
+
+  ///var imageElement = document.getElementById('cat');
+  var modelImg = new Image()
+  modelImg.crossOrigin = null;
+  modelImg.src = modelCalibrateLoc;
+  modelImg.addEventListener('load', function() {
+    console.log('My width is: ', this.naturalWidth);
+    console.log('My height is: ', this.naturalHeight);
+    modelImg.height = this.naturalHeight
+    modelImg.width = this.naturalWidth
+    canvas.width = this.naturalWidth
+    canvas.height = this.naturalHeight
+    var imag = new Image()
+    imag.crossOrigin = "anonymous";
+    imag.src = modelCalibrateLoc;
+    imag.height = this.naturalHeight
+    imag.width = this.naturalWidth
+    var modelPose = net.estimateSinglePose(imag, imageScaleFactor, flipHorizontal, outputStride)
+    modelPose.then(function(result){
+      console.log(result['keypoints'])
+      ctx.drawImage(modelImg, 0, 0)
+      drawSkeleton(result['keypoints'], 0, ctx)
+      console.log('asdf')
+    });
+  });
+
+  imgEle.addEventListener('load', function() {
+    console.log('My width is: ', this.naturalWidth);
+    console.log('My height is: ', this.naturalHeight);
+    imgEle.height = this.naturalHeight
+    imgEle.width = this.naturalWidth
+    canvas.width = this.naturalWidth
+    canvas.height = this.naturalHeight
+    var imag = new Image()
+    imag.crossOrigin = "anonymous";
+    imag.src = modelCalibrateLoc;
+    imag.height = this.naturalHeight
+    imag.width = this.naturalWidth
+    const input = tf.fromPixels(imag)
+    var modelPose = net.estimateSinglePose(input, imageScaleFactor, flipHorizontal, outputStride)
+    modelPose.then(function(result){
+      console.log(result['keypoints'])
+      ctx.drawImage(modelImg, 0, 0)
+      drawSkeleton(result['keypoints'], 0, ctx)
+      drawKeypoints(result['keypoints'], 0, ctx)
+      console.log('asdf')
+    });
+  });
+
+  imgEle.src = modelCalibrateLoc;
+  imgEle.width = 300;
+  imgEle.height = 300;
+  
+  modelPose.forEach(({ score, keypoints }) => {
+      if (guiState.output.showPoints) {
+        drawKeypoints(keypoints, minPartConfidence, ctx);
+      }
+      if (guiState.output.showSkeleton) {
+        drawSkeleton(keypoints, minPartConfidence, ctx);
+      }
+    });
+
+} */
 
 /**
  * Loads a the camera to be used in the demo
@@ -55,7 +151,7 @@ async function loadVideo() {
 }
 
 const guiState = {
-  algorithm: 'multi-pose',
+  algorithm: 'single-pose',
   input: {
     mobileNetArchitecture: isMobile() ? '0.50' : '0.75',
     outputStride: 16,
@@ -88,6 +184,12 @@ function setupGui(cameras, net) {
   }
 }
 
+function calcDistance(p1, p2) {
+  var a = p1['y'] - p2['y']
+  var b = p1['x'] - p2['x']
+  return Math.sqrt( a * a + b * b )
+}
+
 /**
  * Feeds an image to posenet to estimate poses - this is where the magic
  * happens. This function loops with a requestAnimationFrame method.
@@ -95,11 +197,16 @@ function setupGui(cameras, net) {
 function detectPoseInRealTime(video, net) {
   const canvas = document.getElementById('output');
   const ctx = canvas.getContext('2d');
+  var canvas2 = document.getElementById('images');
+  var ctx2 = canvas2.getContext('2d');
+  var angleText = document.getElementById('angles');
   // since images are being fed from a webcam
   const flipHorizontal = true;
 
   canvas.width = videoWidth;
   canvas.height = videoHeight;
+  canvas2.width = videoWidth;
+  canvas2.height = videoHeight;
 
   async function poseDetectionFrame() {
 
@@ -157,13 +264,51 @@ function detectPoseInRealTime(video, net) {
           drawBoundingBox(keypoints, ctx);
         }
       }
+      if (calib) {
+        userCalibratedWeights = []
+        ctx2.save();
+        ctx2.scale(-1, 1);
+        ctx2.drawImage(video, 0, 0, videoWidth*-1, videoHeight)
+        ctx2.restore()
+        drawKeypoints(keypoints, minPartConfidence, ctx2)
+        drawSkeleton(keypoints, minPartConfidence, ctx2)
+        for (i = 0; i < calibratedWeightPairs.length; i++) {
+          var pair = calibratedWeightPairs[i]
+          var a = keypoints[pair[0]]
+          var b = keypoints[pair[1]]
+          var a1 = a['position']
+          var b1 = b['position']
+          userCalibratedWeights.push(calcDistance(a1, b1))
+        }
+        calib = false
+      }
+      else if (save && userCalibratedWeights.length > 0) {
+        ctx2.save();
+        ctx2.scale(-1, 1);
+        ctx2.drawImage(video, 0, 0, videoWidth*-1, videoHeight)
+        ctx2.restore()
+        drawKeypoints(keypoints, minPartConfidence, ctx2)
+        drawSkeleton(keypoints, minPartConfidence, ctx2)
+        modelVectors = convertToVectors(keypoints, userCalibratedWeights)
+        save = false
+      }
+      else if (userCalibratedWeights.length > 0 && modelVectors.length > 0) {
+        var angles = compareVectors(convertToVectors(keypoints, userCalibratedWeights), modelVectors)
+        var str = ''
+        var filler = '0'
+        for (i = 0; i < angles.length; i++) {
+          var angle = Math.round(angles[i])
+          var formattedAngle = ("00" + angle).slice(-3);
+          str += calibratedWeightMeaning[i] + ":" + (formattedAngle) + " "
+        }
+        angleText.innerHTML = str
+      }
     });
 
     // End monitoring code for frames per second
-
+ 
     requestAnimationFrame(poseDetectionFrame);
   }
-
   poseDetectionFrame();
 }
 
@@ -174,9 +319,11 @@ function detectPoseInRealTime(video, net) {
 async function bindPage() {
   // Load the PoseNet model weights with architecture 0.75
   const net = await posenet.load(0.75);
+  const netMod = await posenet.load(0.75);
 
   document.getElementById('loading').style.display = 'none';
   document.getElementById('main').style.display = 'block';
+  document.getElementById('secondary').style.display = 'block';
 
   let video;
 
@@ -192,6 +339,7 @@ async function bindPage() {
 
   setupGui([], net);
   detectPoseInRealTime(video, net);
+
 }
 
 navigator.getUserMedia = navigator.getUserMedia ||
